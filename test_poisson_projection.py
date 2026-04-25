@@ -25,6 +25,9 @@ def main() -> None:
     ybasis = d3.RealFourier(coords["y"], size=args.ny, bounds=(0, 2 * np.pi), dealias=1)
     x, y = dist.local_grids(xbasis, ybasis)
     source = dist.Field(name="source", bases=(xbasis, ybasis))
+
+    # The exact solution of lap(phi)=-2 sin(x) cos(y) is sin(x) cos(y),
+    # with zero mean on the periodic domain.
     expected = np.sin(x) * np.cos(y)
     source["g"] = -2 * expected
     solver = ZeroMeanPoissonSolver(coords, dist, (xbasis, ybasis), name="test")

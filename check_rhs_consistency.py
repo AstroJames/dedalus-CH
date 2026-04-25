@@ -26,12 +26,15 @@ def main() -> None:
     coords, dist, xbasis, ybasis, x, y = build_domain(params)
     rhs_eval = TransformedRHS(params, coords, dist, (xbasis, ybasis), dealias=args.dealias)
 
+    # Build a smooth KHI state, transform it, then compare the induced physical
+    # time derivatives against the direct Navier--Stokes right-hand side.
     s0, ux0, uy0 = khi_initial_arrays_local(params, x, y)
     state = transformed_from_physical(params, rhs_eval, s0, ux0, uy0)
     rec = rhs_eval.reconstruct(state)
     transformed_rhs = rhs_eval.rhs(state)
     ops = rhs_eval.ops
 
+    # Convert Theta_t, Xi_t, and Psi_t back into tau_t, chi_t, and s_t.
     tau_t = transformed_rhs["Theta"] / state["Theta"]
     chi_t = transformed_rhs["Xi"] / state["Xi"]
     s_t_trans = (

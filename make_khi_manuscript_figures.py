@@ -43,10 +43,12 @@ def apply_figure_rc() -> None:
 
 
 def shear_time(params) -> float:
+    """Return the KHI shear-crossing time used to nondimensionalize plots."""
     return float(params["khi_width_fraction"] * params["ly"] / params["khi_u0"])
 
 
 def fft_vorticity(ux: np.ndarray, uy: np.ndarray, lx: float, ly: float) -> np.ndarray:
+    """Compute periodic scalar vorticity from a gathered velocity snapshot."""
     nx, ny = ux.shape
     kx = 2 * np.pi * np.fft.fftfreq(nx, d=lx / nx)[:, None]
     ky = 2 * np.pi * np.fft.fftfreq(ny, d=ly / ny)[None, :]
@@ -54,6 +56,7 @@ def fft_vorticity(ux: np.ndarray, uy: np.ndarray, lx: float, ly: float) -> np.nd
 
 
 def robust_limits(values: list[np.ndarray], symmetric: bool = False, q: float = 99.5):
+    """Choose percentile-based color limits for manuscript panels."""
     flat = np.concatenate([np.ravel(v) for v in values])
     if symmetric:
         vmax = float(np.percentile(np.abs(flat), q))
@@ -91,6 +94,7 @@ def image_panel(fig, ax, field, title, lx, ly, cmap, limits, scientific=False) -
 
 
 def integral_diagnostics(h5: h5py.File) -> dict[str, np.ndarray]:
+    """Compute total momentum and isothermal free energy from snapshots."""
     params = h5["params"].attrs
     snaps = h5["snapshots"]
     lx = float(params["lx"])
@@ -116,6 +120,8 @@ def integral_diagnostics(h5: h5py.File) -> dict[str, np.ndarray]:
         for rho, ux, uy in zip(rho_all, ux_all, uy_all, strict=True):
             out[f"px_{suffix}"].append(float(np.sum(rho * ux) * dxdy))
             out[f"py_{suffix}"].append(float(np.sum(rho * uy) * dxdy))
+            # Isothermal kinetic plus compressive free energy. Kinetic energy
+            # alone is not conserved for compressible isothermal flow.
             kinetic = 0.5 * rho * (ux**2 + uy**2)
             internal = cs**2 * (rho * np.log(rho) - rho + 1.0)
             out[f"energy_{suffix}"].append(float(np.sum(kinetic + internal) * dxdy))

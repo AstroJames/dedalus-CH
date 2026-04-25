@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def params_from_hdf5(h5: h5py.File) -> Params:
+    """Reconstruct a ``Params`` instance from an output file's attributes."""
     attrs = h5["params"].attrs
     kwargs = {}
     for field in Params.__dataclass_fields__:
@@ -61,7 +62,12 @@ def params_from_hdf5(h5: h5py.File) -> Params:
 
 
 class FieldOps:
-    """Dedalus operator helpers returning local grid arrays at requested scale."""
+    """Dedalus operator helpers returning local grid arrays at requested scale.
+
+    The transformed RHS mixes physical-space nonlinear products with spectral
+    derivatives. These wrappers keep the scale conversion explicit, which helps
+    avoid silently differentiating arrays at the wrong dealiasing scale.
+    """
 
     def __init__(self, coords, dist, bases, dealias: float = 3 / 2):
         self.coords = coords
@@ -71,6 +77,7 @@ class FieldOps:
         self.tmp = dist.Field(name="tmp", bases=bases)
 
     def field(self, data: Array, name: str = "tmp", scale: float = 1):
+        """Wrap a local grid array in a Dedalus field at the requested scale."""
         f = self.dist.Field(name=name, bases=self.bases)
         f.change_scales(scale)
         f["g"] = np.asarray(data)
@@ -82,6 +89,7 @@ class FieldOps:
         return self.tmp
 
     def eval_array(self, expr, scale: float = 1) -> Array:
+        """Evaluate a Dedalus operator expression and return local grid data."""
         out = expr.evaluate()
         out.change_scales(scale)
         return np.asarray(out["g"]).copy()
@@ -120,6 +128,8 @@ class FieldOps:
 
 
 class TransformedRHS:
+    """Evaluate the transformed ``Theta, Xi, Psi`` right-hand side."""
+
     def __init__(self, params: Params, coords, dist, bases, dealias: float = 3 / 2):
         self.params = params
         self.ops = FieldOps(coords, dist, bases, dealias=dealias)
@@ -135,6 +145,12 @@ class TransformedRHS:
         input_scale: float = 1,
         output_scale: float = 1,
     ) -> dict[str, Array]:
+        """Map transformed variables back to ``rho`` and velocity.
+
+        The reconstruction uses ``tau=log(Theta)`` and ``chi=log(Xi)`` with
+        the potential split
+        ``u=(-2 mu_c grad tau) + 2 mu_s curl_perp chi``.
+        """
         p = self.params
         theta = self.ops.to_scale(state["Theta"], input_scale, output_scale)
         xi = self.ops.to_scale(state["Xi"], input_scale, output_scale)
@@ -158,6 +174,12 @@ class TransformedRHS:
         }
 
     def forcing_potentials(self, rec: dict[str, Array], scale: float = 1) -> dict[str, Array]:
+        """Project the nonlinear vortex force into scalar potentials.
+
+        In two dimensions ``-u x omega`` is represented as a planar force.
+        Its divergence and scalar curl define the compressive and solenoidal
+        forcing potentials through zero-mean Poisson solves.
+        """
         fx = -rec["uy"] * rec["omega"]
         fy = rec["ux"] * rec["omega"]
         div_f = self.ops.div(fx, fy, scale)
@@ -174,12 +196,15 @@ class TransformedRHS:
         }
 
     def rhs(self, state: dict[str, Array]) -> dict[str, Array]:
+        """Return one transformed RHS evaluation on local grid arrays."""
         p = self.params
         alpha = p.alpha
         mu_c = p.mu_c
         mu_s = p.mu_s
         d_alpha = mu_c / (1 - 2 * alpha)
         scale = self.ops.dealias
+        # Nonlinear products are formed on the dealiasing grid, then converted
+        # back to the stored grid before returning to the RK driver.
         state_work = {key: self.ops.to_scale(state[key], 1, scale) for key in ("Theta", "Xi", "Psi")}
         rec = self.reconstruct(state_work, input_scale=scale, output_scale=scale)
         pots = self.forcing_potentials(rec, scale)
@@ -227,6 +252,7 @@ class TransformedRHS:
 
 
 def transformed_from_physical(params: Params, rhs_eval: TransformedRHS, s: Array, ux: Array, uy: Array):
+    """Initialize transformed variables from physical logarithmic density and velocity."""
     ops = rhs_eval.ops
     divu = ops.div(ux, uy)
     omega = ops.curl_scalar(ux, uy)
@@ -239,6 +265,7 @@ def transformed_from_physical(params: Params, rhs_eval: TransformedRHS, s: Array
 
 
 def rk4_step(rhs_eval: TransformedRHS, state: dict[str, Array], dt: float) -> dict[str, Array]:
+    """Advance the transformed variables by one explicit RK4 step."""
     keys = ["Theta", "Xi", "Psi"]
 
     def combine(base, inc, scale):
@@ -255,6 +282,7 @@ def rk4_step(rhs_eval: TransformedRHS, state: dict[str, Array], dt: float) -> di
 
 
 def positivity(rhs_eval: TransformedRHS, state: dict[str, Array]) -> dict[str, float]:
+    """Return global positivity checks for logarithmic transform variables."""
     dist = rhs_eval.dist
     vals = {
         "theta_min": float(np.min(state["Theta"])),
@@ -265,6 +293,7 @@ def positivity(rhs_eval: TransformedRHS, state: dict[str, Array]) -> dict[str, f
 
 
 def append_diag(diags: dict[str, list], rhs_eval: TransformedRHS, t: float, state: dict[str, Array]) -> None:
+    """Append scalar diagnostics for a transformed-only run."""
     rec = rhs_eval.reconstruct(state)
     mins = positivity(rhs_eval, state)
     vals = {
@@ -279,6 +308,7 @@ def append_diag(diags: dict[str, list], rhs_eval: TransformedRHS, t: float, stat
 
 
 def append_snapshot(snaps: dict[str, list], rhs_eval: TransformedRHS, t: float, state: dict[str, Array]) -> None:
+    """Append reconstructed physical and transformed fields to a local snapshot buffer."""
     rec = rhs_eval.reconstruct(state)
     vals = {
         "t": t,
@@ -319,19 +349,8 @@ def write_hdf5(
             sgrp.create_dataset(key, data=np.asarray(values))
 
 
-def params_from_hdf5(h5: h5py.File) -> Params:
-    attrs = h5["params"].attrs
-    kwargs = {}
-    for field in Params.__dataclass_fields__:
-        if field in attrs:
-            value = attrs[field]
-            if isinstance(value, np.generic):
-                value = value.item()
-            kwargs[field] = value
-    return Params(**kwargs)
-
-
 def rhs_smoke(path: str) -> None:
+    """Evaluate the transformed RHS on the final snapshot of a direct run."""
     with h5py.File(path, "r") as h5:
         params = params_from_hdf5(h5)
         s = h5["snapshots/s"][-1]
@@ -352,6 +371,7 @@ def rhs_smoke(path: str) -> None:
 
 
 def run_transformed(args: argparse.Namespace) -> None:
+    """Run the transformed solver as a standalone IVP."""
     params = Params(
         nx=args.nx,
         ny=args.ny,

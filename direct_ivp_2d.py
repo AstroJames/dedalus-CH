@@ -25,6 +25,8 @@ Array = np.ndarray
 
 @dataclass
 class Params:
+    """Numerical and physical parameters shared by all validation drivers."""
+
     nx: int = 128
     ny: int = 128
     lx: float = 2 * np.pi
@@ -50,10 +52,12 @@ class Params:
 
     @property
     def mu_c(self) -> float:
+        """Longitudinal viscosity coefficient in the compressive potential."""
         return self.zeta + 2 * self.nu
 
     @property
     def bulk(self) -> float:
+        """Coefficient multiplying grad div(u) in the direct velocity equation."""
         return self.zeta + self.nu
 
     def validate(self) -> None:
@@ -76,7 +80,11 @@ class Params:
 
 
 class SpectralPost:
-    """Single-rank periodic FFT helpers for diagnostics/post-processing."""
+    """Single-rank periodic FFT helpers for diagnostics and post-processing.
+
+    These helpers are used only on gathered arrays. The production evolution
+    and MPI-safe projections use Dedalus fields and LBVPs instead.
+    """
 
     def __init__(self, params: Params):
         self.params = params
@@ -138,6 +146,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_domain(params: Params):
+    """Create the 2D periodic Dedalus domain used by all solvers."""
     coords = d3.CartesianCoordinates("x", "y")
     dist = d3.Distributor(coords, dtype=np.float64)
     xbasis = d3.RealFourier(coords["x"], size=params.nx, bounds=(0, params.lx), dealias=3 / 2)
@@ -147,6 +156,12 @@ def build_domain(params: Params):
 
 
 def khi_initial_arrays(params: Params, x: Array, y: Array) -> tuple[Array, Array, Array]:
+    """Return a divergence-free single-rank Kelvin--Helmholtz initial state.
+
+    The base shear is built through a streamfunction so that the validation
+    starts from a clean Helmholtz decomposition. This routine relies on global
+    FFTs and is therefore used only for single-rank direct runs.
+    """
     post = SpectralPost(params)
     y1 = 0.25 * params.ly
     y2 = 0.75 * params.ly
@@ -207,6 +222,12 @@ def transformed_projection(
     ux: Array,
     uy: Array,
 ):
+    """Project physical fields into the Cole--Hopf transformed variables.
+
+    The velocity is split into compressive and solenoidal potentials,
+    ``tau`` and ``chi``, by solving two zero-mean Poisson problems. The
+    density-carrying scalar ``Psi`` is then built from ``rho`` and ``Theta``.
+    """
     rho = np.exp(s)
     divu = post.div(ux, uy)
     omega = post.omega(ux, uy)
@@ -240,6 +261,7 @@ def append_snapshot(
     ux,
     uy,
 ) -> None:
+    """Store a full physical/transformed snapshot in the in-memory HDF5 buffer."""
     s.change_scales(1)
     ux.change_scales(1)
     uy.change_scales(1)
@@ -274,6 +296,7 @@ def append_diag(
     ux,
     uy,
 ) -> None:
+    """Append lightweight scalar diagnostics for the direct run."""
     s.change_scales(1)
     ux.change_scales(1)
     uy.change_scales(1)
@@ -361,6 +384,9 @@ def main() -> None:
     nu = params.nu
     bulk = params.bulk
 
+    # Direct isothermal compressible Navier--Stokes system in logarithmic
+    # density. Dedalus keeps the viscous linear terms on the left-hand side
+    # and evaluates the advection/pressure terms explicitly through RK443.
     problem = d3.IVP([s, ux, uy], namespace=locals())
     problem.add_equation("dt(s) = - ux*dx(s) - uy*dy(s) - divu")
     problem.add_equation(

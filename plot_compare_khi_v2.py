@@ -24,12 +24,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def select_indices(n: int, max_panels: int) -> np.ndarray:
+    """Choose evenly spaced snapshot indices for panel plots."""
     if n <= max_panels:
         return np.arange(n)
     return np.unique(np.linspace(0, n - 1, max_panels).round().astype(int))
 
 
 def robust_limits(values: list[np.ndarray], symmetric: bool = False):
+    """Use percentile limits so isolated extrema do not dominate colormaps."""
     flat = np.concatenate([np.ravel(v) for v in values])
     if symmetric:
         vmax = np.percentile(np.abs(flat), 99.5)
@@ -38,6 +40,7 @@ def robust_limits(values: list[np.ndarray], symmetric: bool = False):
 
 
 def fft_vorticity(ux: np.ndarray, uy: np.ndarray, lx: float, ly: float) -> np.ndarray:
+    """Compute periodic scalar vorticity from gathered velocity snapshots."""
     nx, ny = ux.shape
     kx = 2 * np.pi * np.fft.fftfreq(nx, d=lx / nx)[:, None]
     ky = 2 * np.pi * np.fft.fftfreq(ny, d=ly / ny)[None, :]
@@ -45,6 +48,7 @@ def fft_vorticity(ux: np.ndarray, uy: np.ndarray, lx: float, ly: float) -> np.nd
 
 
 def x_perturbation(field: np.ndarray) -> np.ndarray:
+    """Remove the x-average to emphasize roll-up perturbations."""
     return field - np.mean(field, axis=0, keepdims=True)
 
 
@@ -94,6 +98,7 @@ def plot_panel_grid(
 
 
 def plot_error_history(out_path: Path, h5: h5py.File) -> None:
+    """Plot direct/reconstructed relative errors from the diagnostics group."""
     diag = h5["diagnostics"]
     t = diag["t"][:]
     fig, ax = plt.subplots(figsize=(6.5, 4.0))

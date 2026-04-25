@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_direct_ivp(params: Params, coords, dist, bases):
+    """Build the direct reference IVP on the same domain as the transformed run."""
     xbasis, ybasis = bases
     s = dist.Field(name="s", bases=(xbasis, ybasis))
     ux = dist.Field(name="ux", bases=(xbasis, ybasis))
@@ -86,6 +87,7 @@ def build_direct_ivp(params: Params, coords, dist, bases):
 
 
 def set_direct_fields(s_field, ux_field, uy_field, rec: dict[str, Array]) -> None:
+    """Initialize direct fields from a reconstructed transformed state."""
     s_field.change_scales(1)
     ux_field.change_scales(1)
     uy_field.change_scales(1)
@@ -95,6 +97,7 @@ def set_direct_fields(s_field, ux_field, uy_field, rec: dict[str, Array]) -> Non
 
 
 def direct_arrays(s_field, ux_field, uy_field) -> dict[str, Array]:
+    """Extract direct solver fields as local NumPy arrays."""
     s_field.change_scales(1)
     ux_field.change_scales(1)
     uy_field.change_scales(1)
@@ -120,6 +123,7 @@ def diagnostics(
     transformed_state: dict[str, Array],
     wall_elapsed: float,
 ) -> dict[str, float]:
+    """Compare direct and reconstructed physical states at one time."""
     rec = rhs_eval.reconstruct(transformed_state)
     dist = rhs_eval.dist
     u_err = np.sqrt((rec["ux"] - direct["ux"]) ** 2 + (rec["uy"] - direct["uy"]) ** 2)
@@ -154,6 +158,7 @@ def append_snapshot(
     direct: dict[str, Array],
     transformed_state: dict[str, Array],
 ) -> None:
+    """Gather direct/reconstructed snapshots to rank 0 for HDF5 output."""
     rec = rhs_eval.reconstruct(transformed_state)
     values = {
         "rho_direct": direct["rho"],
@@ -177,6 +182,7 @@ def append_snapshot(
 
 
 def gather_grid(rhs_eval: TransformedRHS, data: Array) -> Array | None:
+    """Gather a distributed local grid array onto rank 0."""
     field = rhs_eval.ops.field(data, name="snapshot_gather")
     field.change_scales(1)
     gathered = field.gather_data(root=0)
@@ -247,6 +253,8 @@ def main() -> None:
 
     s0, ux0, uy0 = khi_initial_arrays_local(params, x, y)
     transformed_state = transformed_from_physical(params, rhs_eval, s0, ux0, uy0)
+    # Start the direct IVP from the reconstructed transformed state, not from
+    # the raw initializer. This removes projection mismatch from the t=0 error.
     set_direct_fields(s_field, ux_field, uy_field, rhs_eval.reconstruct(transformed_state))
 
     diags: dict[str, list] = {}
@@ -279,6 +287,8 @@ def main() -> None:
             append_snapshot(snaps, rhs_eval, t, direct_arrays(s_field, ux_field, uy_field), transformed_state)
             next_snapshot += params.snapshot_dt
 
+        # Keep both systems in lockstep. The final step is shortened so the
+        # direct and transformed states land exactly on t_end.
         step_dt = min(params.dt, params.t_end - float(direct_solver.sim_time))
         direct_solver.step(step_dt)
         transformed_state = rk4_step(rhs_eval, transformed_state, step_dt)

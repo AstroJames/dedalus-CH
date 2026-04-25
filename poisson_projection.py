@@ -42,6 +42,7 @@ class ZeroMeanPoissonSolver:
         self.solver = problem.build_solver()
 
     def solve(self, source) -> PoissonResult:
+        """Solve the Poisson problem for a field or local grid array source."""
         self.source.change_scales(1)
         self.phi.change_scales(1)
         if hasattr(source, "change_scales"):
@@ -60,6 +61,7 @@ class ZeroMeanPoissonSolver:
 
 
 def global_l2(dist, local_data: Array) -> float:
+    """Return the RMS norm over all MPI ranks for local grid data."""
     local_sum = float(np.sum(np.asarray(local_data) ** 2))
     local_count = int(np.asarray(local_data).size)
     total_sum = dist.comm.allreduce(local_sum, op=MPI.SUM)
