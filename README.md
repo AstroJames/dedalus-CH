@@ -1,7 +1,7 @@
-# Beattie 2026 Dedalus KHI Validation
+# Beattie et al. 2026 Dedalus KHI Validation
 
 Minimal Dedalus code used for the Kelvin--Helmholtz validation runs in
-Beattie (2026), "Cole--Hopf-Type Transform for the Isothermal Compressible
+Beattie et al. (2026), "Cole--Hopf-Type Transform for the Isothermal Compressible
 Navier--Stokes Equations."
 
 The repository contains the direct isothermal compressible Navier--Stokes
