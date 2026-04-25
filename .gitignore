@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+output/
+figures/
+*.h5
+*.hdf5
+*.png
+*.pdf
+
+.ipynb_checkpoints/
+.pytest_cache/

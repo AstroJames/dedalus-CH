@@ -1,0 +1,10 @@
+name: beattie2026-dedalus
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - dedalus
+  - mpi4py
+  - numpy
+  - h5py
+  - matplotlib
